@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "AU Wallet Mockup",
+    "slug": "au-wallet-mockup",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}
