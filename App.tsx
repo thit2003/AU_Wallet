@@ -2,23 +2,32 @@ import React, { useMemo, useState } from 'react';
 import {
   Pressable,
   SafeAreaView,
+  Animated,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
+  Image,
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 type Screen =
   | 'welcome'
+  | 'identity_auth' // NEW: Enter student ID & university email
+  | 'create_pin' // NEW: Setup 6-digit passcode
+  | 'identity_proofing' // NEW: Input Passport, National ID, Grad Date
+  | 'verifying' // NEW: Loading spinner status panel
   | 'wallet'
   | 'offer'
   | 'success'
   | 'credential'
   | 'share'
   | 'verification'
-  | 'settings';
+  | 'receipt'
+  | 'history'
+  | 'settings'
 
 type ShareFields = {
   degree: boolean;
@@ -26,6 +35,15 @@ type ShareFields = {
   graduation: boolean;
   gpa: boolean;
   standing: boolean;
+};
+
+type HistoryEvent = {
+  id: string;
+  type: 'share' | 'issue';
+  title: string;
+  subtitle: string;
+  targetScreen: Screen;
+  sharedFields?: ShareFields;
 };
 
 const colors = {
@@ -60,7 +78,7 @@ const copy = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('welcome');
+  const [screen, setScreen] = useState<Screen>('create_pin');
   const [shareFields, setShareFields] = useState({
     degree: true,
     major: true,
@@ -68,11 +86,28 @@ export default function App() {
     gpa: false,
     standing: false,
   });
+  const [history, setHistory] = useState<HistoryEvent[]>([
+    {
+      id: 'initial-issue',
+      type: 'issue',
+      title: 'Issued: Education Transcript VC',
+      subtitle: 'From AU Registrar',
+      targetScreen: 'credential',
+    },
+  ]);
 
   const content = useMemo(() => {
     switch (screen) {
       case 'welcome':
         return <WelcomeScreen onSignIn={() => setScreen('wallet')} />;
+      case 'identity_auth':
+        return <IdentityAuthScreen go={setScreen} />;
+      case 'create_pin':
+        return <CreatePinScreen go={setScreen} />;
+      case 'identity_proofing':
+        return <IdentityProofingScreen go={setScreen} />;
+      case 'verifying':
+        return <VerifyingScreen go={setScreen} />;
       case 'wallet':
         return <WalletScreen go={setScreen} />;
       case 'offer':
@@ -87,10 +122,27 @@ export default function App() {
             fields={shareFields}
             setFields={setShareFields}
             go={setScreen}
+            onShare={() => {
+              const sharedCount = Object.values(shareFields).filter(Boolean).length;
+              const newHistoryEvent: HistoryEvent = {
+                id: `share-${Date.now()}`,
+                type: 'share',
+                title: 'Shared proof with Employer A',
+                subtitle: `Education Transcript VC · ${sharedCount} field${sharedCount === 1 ? '' : 's'}`,
+                targetScreen: 'receipt',
+                sharedFields: { ...shareFields },
+              };
+              setHistory(prevHistory => [newHistoryEvent, ...prevHistory]);
+              setScreen('verification');
+            }}
           />
         );
       case 'verification':
         return <VerificationScreen go={setScreen} />;
+      case 'receipt':
+        return <ReceiptScreen go={setScreen} />;
+      case 'history':
+        return <HistoryScreen go={setScreen} history={history} />;
       case 'settings':
         return <SettingsScreen go={setScreen} />;
     }
@@ -109,23 +161,217 @@ function WelcomeScreen({ onSignIn }: { onSignIn: () => void }) {
     <View style={styles.screen}>
       <StatusChrome />
       <View style={styles.logoGlow} />
-      <View style={styles.auLogo}>
-        <Text style={styles.logoLetters}>AU</Text>
-        <Text style={styles.logoSub}>ASSUMPTION UNIVERSITY</Text>
+      <View style={styles.logoContainer}>
+        <Image source={require('./assets/Assumption_University_of_Thailand_(logo).png')} style={styles.welcomeLogo} />
       </View>
       <View style={styles.welcomeCopy}>
-        <Text style={styles.eyebrowCentered}>ASSUMPTION UNIVERSITY</Text>
         <Text style={styles.welcomeTitle}>AU Wallet</Text>
+        <Text style={[styles.eyebrowCentered, { marginTop: 4 }]}>ASSUMPTION UNIVERSITY</Text>
         <Text style={styles.centerBody}>
           Securely receive, store, and share verified university certificates.
         </Text>
       </View>
       <View style={styles.loginPanel}>
         <Text style={styles.panelHeading}>Continue as student</Text>
-        <Text style={styles.smallBody}>
-          Use AU account or biometric unlock to access your credential wallet.
-        </Text>
         <PrimaryButton label="Sign in with AU Account" onPress={onSignIn} />
+      </View>
+    </View>
+  );
+}
+
+// 1. Enter ID & Email to continue
+function IdentityAuthScreen({ go }: { go: (screen: Screen) => void }) {
+  const [studentId, setStudentId] = useState('');
+  const [email, setEmail] = useState('');
+
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <BackHeader title="Log In" subtitle="Step 2 of 3" onBack={() => go('create_pin')} />
+      <View style={styles.welcomeCopy}>
+        <Text style={styles.welcomeTitle}>Verify Account</Text>
+        <Text style={styles.centerBody}>Enter your student credentials to log into your portal.</Text>
+      </View>
+      <View style={[styles.infoPanel, { marginHorizontal: 20, marginTop: 40, gap: 12 }]}>
+        <Text style={styles.panelHeading}>Student ID</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g., 6412345"
+          placeholderTextColor={colors.muted}
+          value={studentId}
+          onChangeText={setStudentId}
+        />
+        <Text style={styles.panelHeading}>University Email</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="student@u.au.edu"
+          placeholderTextColor={colors.muted}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+      </View>
+      <View style={styles.actionStack}>
+        <PrimaryButton label="Next" onPress={() => go('identity_proofing')} />
+      </View>
+    </View>
+  );
+}
+
+// 2. Create local 6-digit PIN
+function CreatePinScreen({ go }: { go: (screen: Screen) => void }) {
+  const [step, setStep] = useState<'create' | 'confirm'>('create');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [error, setError] = useState(false);
+  const [useBiometrics, setUseBiometrics] = useState(true);
+
+  const handlePinChange = (text: string) => {
+    setError(false);
+    if (step === 'create') {
+      setPin(text);
+    } else {
+      setConfirmPin(text);
+      if (text.length === 6) {
+        if (pin !== text) {
+          setError(true);
+          setTimeout(() => {
+            setPin('');
+            setConfirmPin('');
+            setStep('create');
+            setError(false);
+          }, 1000);
+        }
+      }
+    }
+  };
+
+  const handleNext = () => {
+    setError(false);
+    if (step === 'create') {
+      setStep('confirm');
+    } else if (pin === confirmPin) {
+      go('identity_auth');
+    } else {
+      setError(true);
+    }
+  };
+
+  const currentPin = step === 'create' ? pin : confirmPin;
+  const title = step === 'create' ? 'Create Wallet PIN' : 'Confirm Wallet PIN';
+  const subtitle = error ? 'PINs did not match. Try again.' : 'Set a local code to securely lock your credentials on this phone.';
+
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <TextInput style={styles.pinInputHidden} value={currentPin} onChangeText={handlePinChange} maxLength={6} keyboardType="numeric" autoFocus />
+      <Header eyebrow="Step 1 of 3" title="Create Account" />
+      <ScrollView contentContainerStyle={styles.detailContent}>
+        <View style={styles.welcomeCopy}>
+          <Text style={styles.welcomeTitle}>{title}</Text>
+          <Text style={[styles.centerBody, error && { color: colors.red }]}>{subtitle}</Text>
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 60 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <View key={i} style={[styles.pinBox, error && { borderColor: colors.red }]}>
+              {currentPin[i] && <View style={styles.pinDot} />}
+            </View>
+          ))}
+        </View>
+        <View style={{ marginHorizontal: 20, marginTop: 40 }}>
+          <FieldSwitch label="Use Face ID" code="Enable biometrics for faster login" value={useBiometrics} onPress={() => setUseBiometrics(v => !v)} />
+        </View>
+      </ScrollView>
+      <View style={styles.actionStack}>
+        <PrimaryButton label={step === 'create' ? 'Create PIN' : 'Confirm PIN'} onPress={handleNext} />
+      </View>
+    </View>
+  );
+}
+
+// 3. Input Passport & Official details
+function IdentityProofingScreen({ go }: { go: (screen: Screen) => void }) {
+  const [passport, setPassport] = useState('');
+  const [nationalId, setNationalId] = useState('');
+
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <BackHeader title="Personal Details" subtitle="Step 3 of 3" onBack={() => go('identity_auth')} />
+      <ScrollView contentContainerStyle={styles.detailContent}>
+        <View style={[styles.infoPanel, { gap: 8 }]}>
+          <Text style={styles.switchLabel}>Full Name (as per Passport)</Text>
+          <View style={[styles.settingRow, { backgroundColor: colors.bg }]}><Text>{copy.student}</Text></View>
+
+          <Text style={styles.switchLabel}>Passport Number</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter passport number"
+            placeholderTextColor={colors.muted}
+            value={passport}
+            onChangeText={setPassport}
+          />
+
+          <Text style={styles.switchLabel}>National ID</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter 13-digit ID"
+            placeholderTextColor={colors.muted}
+            value={nationalId}
+            onChangeText={setNationalId}
+            keyboardType="numeric"
+            maxLength={13}
+          />
+
+          <Text style={styles.switchLabel}>Expected Graduation Date</Text>
+          <View style={[styles.settingRow, { backgroundColor: colors.bg }]}><Text>{copy.graduationDisplay}</Text></View>
+        </View>
+      </ScrollView>
+      <View style={styles.actionStack}>
+        <PrimaryButton label="Submit to Registrar" onPress={() => go('verifying')} />
+      </View>
+    </View>
+  );
+}
+
+// 4. Loading State (Issuer Database Verification Loop)
+function VerifyingScreen({ go }: { go: (screen: Screen) => void }) {
+  const spinValue = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.timing(spinValue, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [spinValue]);
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 }}>
+        <Text style={[styles.welcomeTitle, { fontSize: 22 }]}>Verification in Progress</Text>
+        <Text style={[styles.centerBody, { marginBottom: 40 }]}>
+          Assumption University systems are cross-referencing your submitted documentation...
+        </Text>
+        <View style={styles.successHalo}>
+          <View style={[styles.haloOuter, { backgroundColor: colors.sand }]} />
+          <View style={[styles.haloMiddle, { backgroundColor: '#E8DBC9' }]} />
+          <Animated.View style={[styles.haloCore, { backgroundColor: colors.brown, transform: [{ rotate: spin }] }]}>
+            <Text style={{ fontSize: 32 }}>⏳</Text>
+          </Animated.View>
+        </View>
+        <View style={styles.actionStack}>
+          <PrimaryButton label="Return" onPress={() => go('welcome')} />
+        </View>
       </View>
     </View>
   );
@@ -264,10 +510,12 @@ function ShareScreen({
   fields,
   setFields,
   go,
+  onShare,
 }: {
   fields: ShareFields;
   setFields: React.Dispatch<React.SetStateAction<ShareFields>>;
   go: (screen: Screen) => void;
+  onShare: () => void;
 }) {
   const toggle = (key: keyof ShareFields) => setFields((current) => ({ ...current, [key]: !current[key] }));
 
@@ -294,7 +542,7 @@ function ShareScreen({
         </View>
       </ScrollView>
       <View style={styles.actionStack}>
-        <PrimaryButton label="Share proof" onPress={() => go('verification')} />
+        <PrimaryButton label="Share proof" onPress={onShare} />
       </View>
     </View>
   );
@@ -336,6 +584,56 @@ function VerificationScreen({ go }: { go: (screen: Screen) => void }) {
   );
 }
 
+function ReceiptScreen({ go }: { go: (screen: Screen) => void }) {
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <BackHeader title="Disclosure Receipt" subtitle="Shared with Employer A" onBack={() => go('history')} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.detailContent}>
+        <InfoPanel
+          title="Transaction Summary"
+          rows={[
+            ['Recipient', 'Employer A'],
+            ['Purpose', 'Job Application (JOB-2026-001)'],
+            ['Date', '2024-10-27 09:41:21'],
+          ]}
+        />
+        <InfoPanel
+          title="Selective Disclosure Receipt"
+          rows={[['Degree', copy.degree], ['Major', copy.major], ['Graduation', copy.graduationISO]]}
+        />
+        <InfoPanel
+          title="Cryptographic Metadata"
+          rows={[['Transaction ID', '0xabc...789'], ['Signature', '0x123...def'], ['Timestamp', '1672531200']]}
+        />
+      </ScrollView>
+    </View>
+  );
+}
+
+function HistoryScreen({ go, history }: { go: (screen: Screen) => void; history: HistoryEvent[] }) {
+  return (
+    <View style={styles.screen}>
+      <StatusChrome />
+      <Header eyebrow="Wallet Activity" title="History" />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollBottom}>
+        <SectionLabel>THIS WEEK</SectionLabel>
+        {history.map(event => (
+          <Notice
+            key={event.id}
+            icon="✓"
+            tint={colors.green}
+            bg={'#E5F7EC'}
+            {...event}
+            onPress={() => go(event.targetScreen)}
+          />
+        ))}
+      </ScrollView>
+      <BottomNav active="history" go={go} />
+    </View>
+  );
+}
+
 function SettingsScreen({ go }: { go: (screen: Screen) => void }) {
   return (
     <View style={styles.screen}>
@@ -369,7 +667,12 @@ function StatusChrome() {
   return (
     <View style={styles.status}>
       <Text style={styles.statusText}>9:41</Text>
-      <Text style={styles.statusText}>▰  ▱</Text>
+      <View style={styles.battery}>
+        <View style={styles.batteryInner}>
+          <View style={styles.batteryCharge} />
+        </View>
+        <View style={styles.batteryTerminal} />
+      </View>
     </View>
   );
 }
@@ -378,10 +681,12 @@ function Header({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <View style={styles.header}>
       <View>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
+        <Text style={[styles.eyebrow, !title.includes(' ') && {marginTop: 10}]}>{eyebrow}</Text>
         <Text style={styles.headerTitle}>{title}</Text>
       </View>
-      <View style={styles.avatar}><Text style={styles.avatarText}>EC</Text></View>
+      {title.includes(' ') && (
+        <View style={styles.avatar}><Text style={styles.avatarText}>EC</Text></View>
+      )}
     </View>
   );
 }
@@ -587,8 +892,8 @@ function QrMock() {
   );
 }
 
-function BottomNav({ active, go }: { active: 'wallet' | 'settings'; go: (screen: Screen) => void }) {
-  const item = (key: 'wallet' | 'activity' | 'settings', icon: string, label: string, screen: Screen) => {
+function BottomNav({ active, go }: { active: 'wallet' | 'history' | 'settings'; go: (screen: Screen) => void }) {
+  const item = (key: 'wallet' | 'history' | 'settings', icon: string, label: string, screen: Screen) => {
     const isActive = active === key;
     return (
       <Pressable style={styles.navItem} onPress={() => go(screen)}>
@@ -601,7 +906,7 @@ function BottomNav({ active, go }: { active: 'wallet' | 'settings'; go: (screen:
   return (
     <View style={styles.bottomNav}>
       {item('wallet', '◆', 'Wallet', 'wallet')}
-      {item('activity', '≡', 'Activity', 'verification')}
+      {item('history', '≡', 'History', 'history')}
       {item('settings', '⚙', 'Settings', 'settings')}
     </View>
   );
@@ -655,24 +960,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.softRed,
     opacity: 0.85,
   },
-  auLogo: {
+  logoContainer: {
     marginTop: 5,
     marginHorizontal: 9,
     height: 200,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoLetters: {
-    color: colors.red,
-    fontSize: 64,
-    fontWeight: '800',
+  welcomeLogo: {
+    width: 120,
+    height: 120,
+    resizeMode: 'contain',
   },
-  logoSub: {
-    marginTop: 6,
-    color: colors.red,
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 2,
+  welcomeCopy: {
+    marginTop: 20,
+    paddingHorizontal: 42,
+    alignItems: 'center',
   },
   welcomeCopy: {
     marginTop: -12,
@@ -703,8 +1006,8 @@ const styles = StyleSheet.create({
   loginPanel: {
     marginTop: 100,
     marginHorizontal: 20,
-    padding: 22,
-    height: 162,
+    padding: 20,
+    height: 140,
     borderRadius: 24,
     borderWidth: 1,
     borderColor: colors.border,
@@ -714,11 +1017,43 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 30,
     elevation: 6,
+    justifyContent: 'space-between',
   },
   panelHeading: {
     color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  input: {
+    height: 46,
+    backgroundColor: colors.bg,
+    borderRadius: 16,
+    paddingHorizontal: 13,
+    fontSize: 13,
+    color: colors.ink,
+    fontWeight: '500',
+  },
+  pinInputHidden: {
+    position: 'absolute',
+    width: 0,
+    height: 0,
+    opacity: 0,
+  },
+  pinBox: {
+    width: 40,
+    height: 50,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.ink,
   },
   smallBody: {
     color: colors.muted,
@@ -1408,5 +1743,29 @@ const styles = StyleSheet.create({
     color: colors.card,
     fontSize: 13,
     fontWeight: '700',
+  },
+  battery: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  batteryInner: {
+    width: 20,
+    height: 9,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    borderRadius: 2.5,
+    padding: 1,
+  },
+  batteryCharge: {
+    width: '70%',
+    height: '100%',
+    backgroundColor: colors.ink,
+    borderRadius: 1,
+  },
+  batteryTerminal: {
+    width: 1,
+    height: 4,
+    backgroundColor: colors.ink,
+    marginLeft: 1,
   },
 });
